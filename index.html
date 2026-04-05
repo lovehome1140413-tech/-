@@ -250,9 +250,9 @@
       contractTitle: "寵物美容服務定型化契約",
       storeName: "寵愛有家寵物沙龍",
       storeAddress: "新北市樹林區太平路63號",
-      storeLine: "@936mwbwu",
-      liffId: "2009691281-R3UjCIR4",
-      googleScriptUrl: "https://script.google.com/macros/s/AKfycbzluSz7HUr1ZbM_QSrAJyAhnmHZzf8NlN9z2DxnPVYiXMqWKlOP6DWWAO8GFN4lH1PM/exec",
+      storeLine: "https://liff.line.me/2009691281-R3UjCIR4",
+      liffId: "2009621507-8J2X6Oyk",
+      googleScriptUrl: "https://script.google.com/home/projects/1Wn4ONvWXmhHnzj3iAKs2Eyh9m9NjULxBRyeehEIEso7gw3-TETtaV8ON/edit",
       sharedSecret: "Lucky-10293847"
     };
   </script>
@@ -585,7 +585,7 @@ ______________________________________________。
       <div class="label" style="margin-top:0">甲方簽名</div>
       <canvas id="sig"></canvas>
 
-      <div class="dangerNote">簽名完成後將自動回傳至聊天室</div>
+      <div class="dangerNote">簽名完成後將自動回傳摘要至聊天室</div>
 
       <button id="clear" class="btn btnClear" type="button">清除簽名</button>
       <div id="msg" class="msg"></div>
@@ -635,6 +635,12 @@ ______________________________________________。
   const ctx = canvas.getContext("2d");
   canvas.style.touchAction = "none";
 
+  const liffState = {
+    available: false,
+    inClient: false,
+    loginRedirect: false
+  };
+
   function resetSubmit(){
     submitBtn.disabled = false;
     submitBtn.textContent = "送出簽名";
@@ -682,133 +688,134 @@ ______________________________________________。
   function syncSize(){
     const r = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    canvas.width  = Math.round(r.width * dpr);
-    canvas.height = Math.round(r.height * dpr);
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.lineWidth = 4;
+    canvas.width = Math.max(1, Math.floor(r.width * dpr));
+    canvas.height = Math.max(1, Math.floor(r.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.lineWidth = 2.2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.strokeStyle = "#111";
+    ctx.strokeStyle = "#4E3C31";
   }
+
   syncSize();
   window.addEventListener("resize", syncSize);
 
   let drawing = false;
-  let hasStroke = false;
+  let lastX = 0;
+  let lastY = 0;
+  let hasSigned = false;
 
-  function point(e){
-    const r = canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  function getPoint(e){
+    const rect = canvas.getBoundingClientRect();
+    const t = e.touches && e.touches[0] ? e.touches[0] : null;
+    const clientX = t ? t.clientX : e.clientX;
+    const clientY = t ? t.clientY : e.clientY;
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
   }
 
-  function lockScroll(lock){
-    document.body.style.overflow = lock ? "hidden" : "";
-    document.body.style.touchAction = lock ? "none" : "";
-  }
-
-  function down(e){
+  function startDraw(e){
     e.preventDefault();
-    lockScroll(true);
+    const p = getPoint(e);
     drawing = true;
-    const p = point(e);
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    msg.textContent = "";
+    lastX = p.x;
+    lastY = p.y;
   }
 
-  function move(e){
+  function moveDraw(e){
     if(!drawing) return;
     e.preventDefault();
-    const p = point(e);
+    const p = getPoint(e);
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
     ctx.lineTo(p.x, p.y);
     ctx.stroke();
-    hasStroke = true;
+    lastX = p.x;
+    lastY = p.y;
+    hasSigned = true;
   }
 
-  function up(){
+  function endDraw(e){
+    if(!drawing) return;
+    e.preventDefault();
     drawing = false;
-    lockScroll(false);
   }
 
-  canvas.addEventListener("pointerdown", down, { passive:false });
-  canvas.addEventListener("pointermove", move, { passive:false });
-  window.addEventListener("pointerup", up);
-  window.addEventListener("pointercancel", up);
+  canvas.addEventListener("mousedown", startDraw);
+  canvas.addEventListener("mousemove", moveDraw);
+  window.addEventListener("mouseup", endDraw);
 
-  clearBtn.onclick = () => {
+  canvas.addEventListener("touchstart", startDraw, { passive:false });
+  canvas.addEventListener("touchmove", moveDraw, { passive:false });
+  window.addEventListener("touchend", endDraw, { passive:false });
+
+  clearBtn.addEventListener("click", function(){
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    hasStroke = false;
-    setError("已清除，請重新簽名");
-    resetSubmit();
-  };
+    hasSigned = false;
+    setError("");
+  });
 
-  async function initLIFF(){
-    const canUseLiff = !!(window.liff && LIFF_ID);
+  async function initLiff(){
+    if(typeof liff === "undefined"){
+      return;
+    }
 
-    if(!canUseLiff){
-      return { available:false, inClient:false };
+    if(!LIFF_ID){
+      return;
     }
 
     try{
+      liffState.available = true;
       await liff.init({ liffId: LIFF_ID });
-
-      if(!liff.isInClient()){
-        return { available:true, inClient:false };
-      }
+      liffState.inClient = liff.isInClient();
 
       if(!liff.isLoggedIn()){
-        liff.login();
-        return { available:true, inClient:true, loginRedirect:true };
+        liffState.loginRedirect = true;
+        liff.login({ redirectUri: location.href });
+        return;
       }
-
-      return { available:true, inClient:true };
-    }catch(e){
-      return { available:false, inClient:false };
+    }catch(err){
+      console.error("LIFF 初始化失敗：", err);
     }
   }
 
-  submitBtn.onclick = async () => {
-    msg.textContent = "";
+  initLiff();
+
+  submitBtn.onclick = async function(){
     submitBtn.disabled = true;
-    submitBtn.textContent = "謝謝您！資料上傳中...";
-
-    if(!agree.checked){
-      setError("請先勾選同意契約內容");
-      resetSubmit();
-      return;
-    }
-
-    const data = {
-      ownerName: requireValue(ownerName, "甲方姓名"),
-      ownerIdNo: requireValue(ownerIdNo, "身分證字號"),
-      ownerAddress: requireValue(ownerAddress, "通訊地址"),
-      ownerPhone: requireValue(ownerPhone, "聯絡電話"),
-      emergencyName: requireValue(emergencyName, "緊急聯絡人"),
-      emergencyPhone: requireValue(emergencyPhone, "緊急聯絡人電話"),
-      ownerEmail: requireValue(ownerEmail, "Email（寄送附本用）"),
-      signDate: requireValue(signDate, "簽署日期")
-    };
-
-    if(Object.values(data).some(v => v === null)){
-      resetSubmit();
-      return;
-    }
-
-    if(!isValidEmail(data.ownerEmail)){
-      setError("Email 格式不正確，請重新確認");
-      ownerEmail.focus();
-      resetSubmit();
-      return;
-    }
-
-    if(!hasStroke){
-      setError("請先完成簽名");
-      resetSubmit();
-      return;
-    }
+    submitBtn.textContent = "送出中...";
+    setError("");
 
     try{
-      const liffState = await initLIFF();
+      if(!agree.checked){
+        throw new Error("請先勾選同意契約內容");
+      }
+
+      const data = {
+        ownerName: requireValue(ownerName, "甲方姓名"),
+        ownerIdNo: requireValue(ownerIdNo, "身分證字號"),
+        ownerAddress: requireValue(ownerAddress, "通訊地址"),
+        ownerPhone: requireValue(ownerPhone, "聯絡電話"),
+        emergencyName: requireValue(emergencyName, "緊急聯絡人"),
+        emergencyPhone: requireValue(emergencyPhone, "緊急聯絡人電話"),
+        ownerEmail: requireValue(ownerEmail, "Email"),
+        signDate: requireValue(signDate, "審閱 / 簽署日期")
+      };
+
+      for(const k in data){
+        if(data[k] == null) return;
+      }
+
+      if(!isValidEmail(data.ownerEmail)){
+        throw new Error("Email 格式不正確");
+      }
+
+      if(!hasSigned){
+        throw new Error("請先完成簽名");
+      }
+
       if(liffState && liffState.loginRedirect){
         resetSubmit();
         return;
@@ -865,8 +872,13 @@ ${completeNote}`;
       }
 
       if(liffState && liffState.available && liffState.inClient){
-        await liff.sendMessages([{ type:"text", text:textMsg }]);
-        setOK("資料已送出！\n可以回到聊天室了！");
+        try{
+          await liff.sendMessages([{ type:"text", text:textMsg }]);
+          setOK("資料已送出！\n摘要已回傳聊天室，可以回到LINE了！");
+        }catch(e){
+          console.error("LINE 摘要回傳失敗：", e);
+          setOK("資料已送出！\n副本將寄送到您的 Email。");
+        }
       }else{
         setOK("資料已送出！\n副本將寄送到您的 Email。");
       }
